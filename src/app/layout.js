@@ -15,7 +15,7 @@ export const metadata = {
   title: "SPC Telemetry",
   description: "Created by SPC",
   icons: {
-    icon: "/favicon.ico",
+    icon: "/telemetryweb/favicon.ico",
   },
 };
 
