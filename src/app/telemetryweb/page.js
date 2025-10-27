@@ -19,10 +19,12 @@ export default function Home() {
   const [observations, setObservations] = useState([]);
   const [obsLoading, setObsLoading] = useState(false);
   const [obsError, setObsError] = useState("");
+  const [isLive, setIsLive] = useState(true); // Live mode enabled by default
 
   // TODO: Replace with your actual API key
   const API_KEY = "VYMrSYGBPfpbA8CLxgijzSmrO_BUlKdrtQcMiIdK9h8";
 
+  // Fetch all initial data
   useEffect(() => {
     async function fetchStations() {
       setLoading(true);
@@ -80,41 +82,87 @@ export default function Home() {
     fetchBatteries();
   }, []);
 
+  // Fetch observations function - can be called manually or by interval
+  const fetchObservations = async () => {
+    if (!selected) return;
+    setObsLoading(true);
+    setObsError("");
+    try {
+      // Find sensors for selected station
+      const stationSensors = sensors.filter(s => s.station_id === selected);
+      if (stationSensors.length === 0) {
+        setObservations([]);
+        setObsLoading(false);
+        return;
+      }
+      // For demo, use first sensor
+      const sensorId = stationSensors[0].id;
+      const res = await fetch("https://opmdata.gem.spc.int/telemetry/api/observations", {
+        headers: {
+          "X-API-KEY": API_KEY,
+        },
+      });
+      if (!res.ok) throw new Error("Failed to fetch observations");
+      const data = await res.json();
+      // Filter observations for sensorId and only keep last N
+      const sensorObservations = data.filter(o => o.sensor_id === sensorId);
+      const lastN = sensorObservations.slice(-rowCount);
+      setObservations(lastN);
+    } catch (err) {
+      setObsError(err.message);
+    } finally {
+      setObsLoading(false);
+    }
+  };
+
+  // Fetch batteries function - can be called manually or by interval
+  const fetchBatteriesData = async () => {
+    setBatLoading(true);
+    setBatError("");
+    try {
+      const res = await fetch("https://opmdata.gem.spc.int/telemetry/api/batteries", {
+        headers: {
+          "X-API-KEY": API_KEY,
+        },
+      });
+      if (!res.ok) throw new Error("Failed to fetch batteries");
+      const data = await res.json();
+      setBatteries(data);
+    } catch (err) {
+      setBatError(err.message);
+    } finally {
+      setBatLoading(false);
+    }
+  };
+
   // Fetch observations when selected station or rowCount changes
   useEffect(() => {
-    if (!selected) return;
-    async function fetchObservations() {
-      setObsLoading(true);
-      setObsError("");
-      try {
-        // Find sensors for selected station
-        const stationSensors = sensors.filter(s => s.station_id === selected);
-        if (stationSensors.length === 0) {
-          setObservations([]);
-          setObsLoading(false);
-          return;
-        }
-        // For demo, use first sensor
-        const sensorId = stationSensors[0].id;
-        const res = await fetch("https://opmdata.gem.spc.int/telemetry/api/observations", {
-          headers: {
-            "X-API-KEY": API_KEY,
-          },
-        });
-        if (!res.ok) throw new Error("Failed to fetch observations");
-        const data = await res.json();
-        // Filter observations for sensorId and only keep last N
-        const sensorObservations = data.filter(o => o.sensor_id === sensorId);
-        const lastN = sensorObservations.slice(-rowCount);
-        setObservations(lastN);
-      } catch (err) {
-        setObsError(err.message);
-      } finally {
-        setObsLoading(false);
-      }
-    }
     fetchObservations();
   }, [selected, sensors, rowCount]);
+
+  // Set up interval for live updates
+  useEffect(() => {
+    let intervalId;
+    
+    if (isLive) {
+      // Fetch data immediately when live mode is enabled
+      fetchObservations();
+      fetchBatteriesData();
+      
+      // Set up interval to fetch data every minute
+      intervalId = setInterval(() => {
+        fetchObservations();
+        fetchBatteriesData();
+      }, 60000); // 60 seconds = 60000 milliseconds
+    }
+    
+    // Cleanup interval on component unmount or when live mode is disabled
+    return () => {
+      if (intervalId) {
+        clearInterval(intervalId);
+      }
+    };
+  }, [isLive, selected, sensors, rowCount]);
 
   // Chart 1: timestamp vs reading for selected station's first sensor
   const chartData1 = {
@@ -190,6 +238,12 @@ export default function Home() {
     },
   };
 
+  // Manual refresh function
+  const handleManualRefresh = () => {
+    fetchObservations();
+    fetchBatteriesData();
+  };
+
   return (
     <div className={styles.page}>
       <nav style={{ width: "100%", background: "#222", color: "#fff", padding: "1rem 2rem", position: "fixed", top: 0, left: 0, zIndex: 10 }}>
@@ -198,7 +252,7 @@ export default function Home() {
       <div style={{ 
         marginTop: "5rem", 
         width: "100%", 
-        maxWidth: "1200px", // Increased from 800px to 1200px
+        maxWidth: "1200px",
         background: "#fff", 
         padding: "2rem", 
         borderRadius: 8, 
@@ -207,7 +261,7 @@ export default function Home() {
         flexDirection: "column", 
         gap: "2rem" 
       }}>
-        <div style={{ display: "flex", alignItems: "center", gap: "1rem" }}>
+        <div style={{ display: "flex", alignItems: "center", gap: "1rem", flexWrap: "wrap" }}>
           <label htmlFor="dropdown" style={{ fontWeight: "bold", marginRight: 8 }}>Select Station:</label>
           {loading ? (
             <span>Loading stations...</span>
@@ -235,6 +289,38 @@ export default function Home() {
             onChange={e => setRowCount(Math.max(1, Math.min(1000, Number(e.target.value))))}
             style={{ width: 80, padding: "0.5rem", borderRadius: 4, border: "1px solid #ccc" }}
           />
+          
+          {/* Live Mode Toggle */}
+          <div style={{ display: "flex", alignItems: "center", gap: "0.5rem", marginLeft: "auto" }}>
+         
+            <label style={{ display: "flex", alignItems: "center", gap: "0.5rem", cursor: "pointer" }}>
+              <input
+                type="checkbox"
+                checked={isLive}
+                onChange={(e) => setIsLive(e.target.checked)}
+                style={{ width: "18px", height: "18px" }}
+              />
+              <span style={{ fontWeight: "bold" }}>Live Mode</span>
+            </label>
+            {isLive && (
+              <span style={{ 
+                display: "flex", 
+                alignItems: "center", 
+                gap: "0.25rem",
+                color: "#d73e3eff",
+                fontSize: "0.875rem"
+              }}>
+                <span style={{
+                  width: "8px",
+                  height: "8px",
+                  borderRadius: "50%",
+                  background: "#d73e3eff",
+                  animation: "pulse 1.5s infinite"
+                }}></span>
+                Updating every minute
+              </span>
+            )}
+          </div>
         </div>
         
         {/* Chart 1 Container */}
@@ -267,6 +353,15 @@ export default function Home() {
           )}
         </div>
       </div>
+      
+      {/* Add pulsing animation for live indicator */}
+      <style jsx>{`
+        @keyframes pulse {
+          0% { opacity: 1; }
+          50% { opacity: 0.5; }
+          100% { opacity: 1; }
+        }
+      `}</style>
     </div>
   );
 }
